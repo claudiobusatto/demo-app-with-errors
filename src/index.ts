@@ -1,18 +1,34 @@
 const port = Number(process.env.PORT ?? 4000);
 
+type User = {
+  id: string;
+  name: string;
+};
+
 type Todo = {
   id: string;
   title: string;
   category: string;
   completed: boolean;
   createdAt: string;
+  assignedToUserId: string | null;
 };
 
+const users: User[] = [];
 const todos: Todo[] = [];
-let nextId = 1;
+let nextUserId = 1;
+let nextTodoId = 1;
 
-function generateId(): string {
-  return String(nextId++);
+function generateUserId(): string {
+  return String(nextUserId++);
+}
+
+function generateTodoId(): string {
+  return String(nextTodoId++);
+}
+
+function findUserById(id: string): User | undefined {
+  return users.find((u) => u.id === id);
 }
 
 function getTodoIndex(id: string): number {
@@ -112,29 +128,50 @@ const html = `<!DOCTYPE html>
       background: #27272a;
       color: #a1a1aa;
     }
+    .assignee { font-size: 0.75rem; color: #71717a; }
     .error { color: #f87171; font-size: 0.875rem; margin-top: 0.5rem; }
+    .section { margin-bottom: 1.5rem; }
+    .section h2 { font-size: 1rem; margin-bottom: 0.5rem; color: #a1a1aa; }
   </style>
 </head>
 <body>
   <h1>Todo List</h1>
-  <form id="form">
-    <input type="text" id="input" placeholder="What needs to be done?" autocomplete="off" />
-    <select id="category">
-      <option value="Work">Work</option>
-      <option value="Personal">Personal</option>
-      <option value="Shopping">Shopping</option>
-      <option value="Other">Other</option>
-    </select>
-    <button type="submit" class="primary">Add</button>
-  </form>
+  <div class="section">
+    <h2>Users</h2>
+    <form id="userForm">
+      <input type="text" id="userName" placeholder="User name" autocomplete="off" />
+      <button type="submit" class="primary">Add user</button>
+    </form>
+    <ul id="userList"></ul>
+  </div>
+  <div class="section">
+    <h2>New todo</h2>
+    <form id="form">
+      <input type="text" id="input" placeholder="What needs to be done?" autocomplete="off" />
+      <select id="category">
+        <option value="Work">Work</option>
+        <option value="Personal">Personal</option>
+        <option value="Shopping">Shopping</option>
+        <option value="Other">Other</option>
+      </select>
+      <select id="assignee">
+        <option value="">Unassigned</option>
+      </select>
+      <button type="submit" class="primary">Add</button>
+    </form>
+  </div>
   <p id="error" class="error" hidden></p>
   <ul id="list"></ul>
   <script>
     const form = document.getElementById('form');
     const input = document.getElementById('input');
     const categorySelect = document.getElementById('category');
+    const assigneeSelect = document.getElementById('assignee');
     const list = document.getElementById('list');
     const errEl = document.getElementById('error');
+    const userForm = document.getElementById('userForm');
+    const userNameInput = document.getElementById('userName');
+    const userList = document.getElementById('userList');
 
     function showError(msg) {
       errEl.textContent = msg;
@@ -145,18 +182,29 @@ const html = `<!DOCTYPE html>
       errEl.hidden = true;
     }
 
+    async function loadUsers() {
+      const res = await fetch('/users');
+      if (!res.ok) return;
+      const data = await res.json();
+      assigneeSelect.innerHTML = '<option value="">Unassigned</option>' +
+        data.users.map(u => '<option value="' + u.id + '">' + escapeHtml(u.name) + '</option>').join('');
+      userList.innerHTML = data.users.map(u => '<li>' + escapeHtml(u.name) + '</li>').join('');
+    }
+
     async function load() {
       const res = await fetch('/todos');
       if (!res.ok) return showError('Failed to load todos');
       clearError();
       const data = await res.json();
-      list.innerHTML = data.todos.map(t => 
-        '<li data-id="' + t.id + '" class="' + (t.completed ? 'done' : '') + '">' +
-        '<input type="checkbox" ' + (t.completed ? 'checked' : '') + ' />' +
-        '<span class="title">' + escapeHtml(t.title) + '</span>' +
-        '<span class="category">' + escapeHtml(t.category || 'General') + '</span>' +
-        '<button type="button" class="danger">Delete</button></li>'
-      ).join('');
+      list.innerHTML = data.todos.map(t => {
+        const assignee = t.assignedUser ? escapeHtml(t.assignedUser.name) : '—';
+        return '<li data-id="' + t.id + '" class="' + (t.completed ? 'done' : '') + '">' +
+          '<input type="checkbox" ' + (t.completed ? 'checked' : '') + ' />' +
+          '<span class="title">' + escapeHtml(t.title) + '</span>' +
+          '<span class="category">' + escapeHtml(t.category || 'General') + '</span>' +
+          '<span class="assignee">' + assignee + '</span>' +
+          '<button type="button" class="danger">Delete</button></li>';
+      }).join('');
       list.querySelectorAll('input[type="checkbox"]').forEach((cb, i) => {
         cb.addEventListener('change', () => toggle(data.todos[i].id));
       });
@@ -171,15 +219,31 @@ const html = `<!DOCTYPE html>
       return div.innerHTML;
     }
 
+    userForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const name = (userNameInput && userNameInput.value) ? userNameInput.value.trim() : '';
+      if (!name) return;
+      const res = await fetch('/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      if (!res.ok) return showError('Failed to add user');
+      clearError();
+      userNameInput.value = '';
+      loadUsers();
+    });
+
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       const title = input.value.trim();
       if (!title) return;
       const category = (categorySelect && categorySelect.value) ? categorySelect.value : 'General';
+      const assignedToUserId = (assigneeSelect && assigneeSelect.value) ? assigneeSelect.value : null;
       const res = await fetch('/todos', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, category }),
+        body: JSON.stringify({ title, category, assignedToUserId }),
       });
       if (!res.ok) return showError('Failed to add todo');
       clearError();
@@ -205,6 +269,7 @@ const html = `<!DOCTYPE html>
       load();
     }
 
+    loadUsers();
     load();
   </script>
 </body>
@@ -227,15 +292,44 @@ const server = Bun.serve({
       return Response.json({ status: "ok", service: "todo-list" });
     }
 
+    if (method === "GET" && path === "/users") {
+      return Response.json({ users });
+    }
+
+    if (method === "POST" && path === "/users") {
+      let body: { name?: string };
+      try {
+        body = await req.json();
+      } catch {
+        return Response.json({ error: "Invalid JSON" }, { status: 400 });
+      }
+      const name = typeof body?.name === "string" ? body.name.trim() : "";
+      if (!name) {
+        return Response.json({ error: "name is required" }, { status: 400 });
+      }
+      const user: User = { id: generateUserId(), name };
+      users.push(user);
+      return Response.json(user, { status: 201 });
+    }
+
     if (method === "GET" && path === "/todos") {
-      // Normalize output: trim whitespace from titles
+      // Normalize output: trim whitespace from titles and attach assigned user
       return Response.json({
-        todos: todos.map((t) => ({ ...t, title: t.title.trim() })),
+        todos: todos.map((t) => {
+          const assignedUser = t.assignedToUserId
+            ? findUserById(t.assignedToUserId) ?? null
+            : null;
+          return {
+            ...t,
+            title: t.title.trim(),
+            assignedUser: assignedUser ? { id: assignedUser.id, name: assignedUser.name } : null,
+          };
+        }),
       });
     }
 
     if (method === "POST" && path === "/todos") {
-      let body: { title?: string; category?: string };
+      let body: { title?: string; category?: string; assignedToUserId?: string | null };
       try {
         body = await req.json();
       } catch {
@@ -249,12 +343,21 @@ const server = Bun.serve({
         typeof body?.category === "string" && body.category.trim()
           ? body.category.trim()
           : "General";
+      const rawAssigned = body?.assignedToUserId;
+      const assignedToUserId =
+        rawAssigned === null || rawAssigned === undefined || rawAssigned === ""
+          ? null
+          : String(rawAssigned);
+      if (assignedToUserId !== null && !findUserById(assignedToUserId)) {
+        return Response.json({ error: "User not found" }, { status: 400 });
+      }
       const todo: Todo = {
-        id: generateId(),
+        id: generateTodoId(),
         title,
         category,
         completed: false,
         createdAt: new Date().toISOString(),
+        assignedToUserId,
       };
       todos.push(todo);
       return Response.json(todo, { status: 201 });
@@ -267,7 +370,12 @@ const server = Bun.serve({
       if (idx === -1) {
         return Response.json({ error: "Todo not found" }, { status: 404 });
       }
-      let body: { title?: string; category?: string; completed?: boolean };
+      let body: {
+        title?: string;
+        category?: string;
+        assignedToUserId?: string | null;
+        completed?: boolean;
+      };
       try {
         body = await req.json();
       } catch {
@@ -277,6 +385,15 @@ const server = Bun.serve({
       if ("title" in body) todos[idx].title = body.title ?? todos[idx].title;
       if (typeof body?.category === "string" && body.category.trim())
         todos[idx].category = body.category.trim();
+      if ("assignedToUserId" in body) {
+        const raw = body.assignedToUserId;
+        const uid =
+          raw === null || raw === undefined || raw === "" ? null : String(raw);
+        if (uid !== null && !findUserById(uid)) {
+          return Response.json({ error: "User not found" }, { status: 400 });
+        }
+        todos[idx].assignedToUserId = uid;
+      }
       if (typeof body?.completed === "boolean") todos[idx].completed = body.completed;
       return Response.json(todos[idx]);
     }
