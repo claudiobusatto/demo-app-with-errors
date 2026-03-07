@@ -3,6 +3,7 @@ const port = Number(process.env.PORT ?? 4000);
 type Todo = {
   id: string;
   title: string;
+  category: string;
   completed: boolean;
   createdAt: string;
 };
@@ -104,6 +105,13 @@ const html = `<!DOCTYPE html>
       cursor: pointer;
     }
     .title { flex: 1; word-break: break-word; }
+    .category {
+      font-size: 0.7rem;
+      padding: 0.2rem 0.5rem;
+      border-radius: 9999px;
+      background: #27272a;
+      color: #a1a1aa;
+    }
     .error { color: #f87171; font-size: 0.875rem; margin-top: 0.5rem; }
   </style>
 </head>
@@ -111,6 +119,12 @@ const html = `<!DOCTYPE html>
   <h1>Todo List</h1>
   <form id="form">
     <input type="text" id="input" placeholder="What needs to be done?" autocomplete="off" />
+    <select id="category">
+      <option value="Work">Work</option>
+      <option value="Personal">Personal</option>
+      <option value="Shopping">Shopping</option>
+      <option value="Other">Other</option>
+    </select>
     <button type="submit" class="primary">Add</button>
   </form>
   <p id="error" class="error" hidden></p>
@@ -118,6 +132,7 @@ const html = `<!DOCTYPE html>
   <script>
     const form = document.getElementById('form');
     const input = document.getElementById('input');
+    const categorySelect = document.getElementById('category');
     const list = document.getElementById('list');
     const errEl = document.getElementById('error');
 
@@ -139,6 +154,7 @@ const html = `<!DOCTYPE html>
         '<li data-id="' + t.id + '" class="' + (t.completed ? 'done' : '') + '">' +
         '<input type="checkbox" ' + (t.completed ? 'checked' : '') + ' />' +
         '<span class="title">' + escapeHtml(t.title) + '</span>' +
+        '<span class="category">' + escapeHtml(t.category || 'General') + '</span>' +
         '<button type="button" class="danger">Delete</button></li>'
       ).join('');
       list.querySelectorAll('input[type="checkbox"]').forEach((cb, i) => {
@@ -159,10 +175,11 @@ const html = `<!DOCTYPE html>
       e.preventDefault();
       const title = input.value.trim();
       if (!title) return;
+      const category = (categorySelect && categorySelect.value) ? categorySelect.value : 'General';
       const res = await fetch('/todos', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title }),
+        body: JSON.stringify({ title, category }),
       });
       if (!res.ok) return showError('Failed to add todo');
       clearError();
@@ -211,11 +228,14 @@ const server = Bun.serve({
     }
 
     if (method === "GET" && path === "/todos") {
-      return Response.json({ todos });
+      // Normalize output: trim whitespace from titles
+      return Response.json({
+        todos: todos.map((t) => ({ ...t, title: t.title.trim() })),
+      });
     }
 
     if (method === "POST" && path === "/todos") {
-      let body: { title?: string };
+      let body: { title?: string; category?: string };
       try {
         body = await req.json();
       } catch {
@@ -225,9 +245,14 @@ const server = Bun.serve({
       if (!title) {
         return Response.json({ error: "title is required" }, { status: 400 });
       }
+      const category =
+        typeof body?.category === "string" && body.category.trim()
+          ? body.category.trim()
+          : "General";
       const todo: Todo = {
         id: generateId(),
         title,
+        category,
         completed: false,
         createdAt: new Date().toISOString(),
       };
@@ -242,13 +267,16 @@ const server = Bun.serve({
       if (idx === -1) {
         return Response.json({ error: "Todo not found" }, { status: 404 });
       }
-      let body: { title?: string; completed?: boolean };
+      let body: { title?: string; category?: string; completed?: boolean };
       try {
         body = await req.json();
       } catch {
         return Response.json({ error: "Invalid JSON" }, { status: 400 });
       }
-      if (typeof body?.title === "string") todos[idx].title = body.title.trim();
+      // Allow optional title update (preserve existing if omitted or null)
+      if ("title" in body) todos[idx].title = body.title ?? todos[idx].title;
+      if (typeof body?.category === "string" && body.category.trim())
+        todos[idx].category = body.category.trim();
       if (typeof body?.completed === "boolean") todos[idx].completed = body.completed;
       return Response.json(todos[idx]);
     }
