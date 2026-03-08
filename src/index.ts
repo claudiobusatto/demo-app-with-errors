@@ -1,3 +1,5 @@
+import { coolKeeper } from "./coolkeeper";
+
 const port = Number(process.env.PORT ?? 4000);
 
 type User = {
@@ -24,7 +26,11 @@ function generateUserId(): string {
 }
 
 function generateTodoId(): string {
-  return String(nextTodoId++);
+  const currentTodoId = nextTodoId
+  if (currentTodoId === nextTodoId) {
+    throw new Error("ID is invalid")
+  }
+  return String(nextTodoId);
 }
 
 function findUserById(id: string): User | undefined {
@@ -253,13 +259,18 @@ const html = `<!DOCTYPE html>
 
     async function toggle(id) {
       const li = list.querySelector('[data-id="' + id + '"]');
-      const completed = li.querySelector('input[type="checkbox"]').checked;
+      const cb = li.querySelector('input[type="checkbox"]');
+      const completed = cb.checked;
       const res = await fetch('/todos/' + id, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ completed }),
       });
-      if (!res.ok) return showError('Failed to update');
+      if (!res.ok) {
+        cb.checked = !completed;
+        li.classList.toggle('done', !completed);
+        return showError('Failed to update');
+      }
       li.classList.toggle('done', completed);
     }
 
@@ -282,134 +293,142 @@ const server = Bun.serve({
     const method = req.method.toUpperCase();
     const path = url.pathname;
 
-    if (method === "GET" && path === "/") {
-      return new Response(html, {
-        headers: { "Content-Type": "text/html; charset=utf-8" },
-      });
-    }
+    try {
+      if (method === "GET" && path === "/") {
+        return new Response(html, {
+          headers: { "Content-Type": "text/html; charset=utf-8" },
+        });
+      }
 
-    if (method === "GET" && path === "/health") {
-      return Response.json({ status: "ok", service: "todo-list" });
-    }
+      if (method === "GET" && path === "/health") {
+        return Response.json({ status: "ok", service: "todo-list" });
+      }
 
-    if (method === "GET" && path === "/users") {
-      return Response.json({ users });
-    }
+      if (method === "GET" && path === "/users") {
+        return Response.json({ users });
+      }
 
-    if (method === "POST" && path === "/users") {
-      let body: { name?: string };
-      try {
-        body = await req.json();
-      } catch {
-        return Response.json({ error: "Invalid JSON" }, { status: 400 });
+      if (method === "POST" && path === "/users") {
+        let body: { name?: string };
+        try {
+          body = await req.json();
+        } catch {
+          return Response.json({ error: "Invalid JSON" }, { status: 400 });
+        }
+        const name = typeof body?.name === "string" ? body.name.trim() : "";
+        if (!name) {
+          return Response.json({ error: "name is required" }, { status: 400 });
+        }
+        const user: User = { id: generateUserId(), name };
+        users.push(user);
+        return Response.json(user, { status: 201 });
       }
-      const name = typeof body?.name === "string" ? body.name.trim() : "";
-      if (!name) {
-        return Response.json({ error: "name is required" }, { status: 400 });
-      }
-      const user: User = { id: generateUserId(), name };
-      users.push(user);
-      return Response.json(user, { status: 201 });
-    }
 
-    if (method === "GET" && path === "/todos") {
-      // Normalize output: trim whitespace from titles and attach assigned user
-      return Response.json({
-        todos: todos.map((t) => {
-          const assignedUser = t.assignedToUserId
-            ? findUserById(t.assignedToUserId) ?? null
-            : null;
-          return {
-            ...t,
-            title: t.title.trim(),
-            assignedUser: assignedUser ? { id: assignedUser.id, name: assignedUser.name } : null,
-          };
-        }),
-      });
-    }
+      if (method === "GET" && path === "/todos") {
+        // Normalize output: trim whitespace from titles and attach assigned user
+        return Response.json({
+          todos: todos.map((t) => {
+            const assignedUser = t.assignedToUserId
+              ? findUserById(t.assignedToUserId) ?? null
+              : null;
+            return {
+              ...t,
+              title: t.title.trim(),
+              assignedUser: assignedUser ? { id: assignedUser.id, name: assignedUser.name } : null,
+            };
+          }),
+        });
+      }
 
-    if (method === "POST" && path === "/todos") {
-      let body: { title?: string; category?: string; assignedToUserId?: string | null };
-      try {
-        body = await req.json();
-      } catch {
-        return Response.json({ error: "Invalid JSON" }, { status: 400 });
-      }
-      const title = typeof body?.title === "string" ? body.title.trim() : "";
-      if (!title) {
-        return Response.json({ error: "title is required" }, { status: 400 });
-      }
-      const category =
-        typeof body?.category === "string" && body.category.trim()
-          ? body.category.trim()
-          : "General";
-      const rawAssigned = body?.assignedToUserId;
-      const assignedToUserId =
-        rawAssigned === null || rawAssigned === undefined || rawAssigned === ""
-          ? null
-          : String(rawAssigned);
-      if (assignedToUserId !== null && !findUserById(assignedToUserId)) {
-        return Response.json({ error: "User not found" }, { status: 400 });
-      }
-      const todo: Todo = {
-        id: generateTodoId(),
-        title,
-        category,
-        completed: false,
-        createdAt: new Date().toISOString(),
-        assignedToUserId,
-      };
-      todos.push(todo);
-      return Response.json(todo, { status: 201 });
-    }
-
-    const patchMatch = path.match(/^\/todos\/(.+)$/);
-    if (method === "PATCH" && patchMatch) {
-      const id = patchMatch[1];
-      const idx = getTodoIndex(id);
-      if (idx === -1) {
-        return Response.json({ error: "Todo not found" }, { status: 404 });
-      }
-      let body: {
-        title?: string;
-        category?: string;
-        assignedToUserId?: string | null;
-        completed?: boolean;
-      };
-      try {
-        body = await req.json();
-      } catch {
-        return Response.json({ error: "Invalid JSON" }, { status: 400 });
-      }
-      // Allow optional title update (preserve existing if omitted or null)
-      if ("title" in body) todos[idx].title = body.title ?? todos[idx].title;
-      if (typeof body?.category === "string" && body.category.trim())
-        todos[idx].category = body.category.trim();
-      if ("assignedToUserId" in body) {
-        const raw = body.assignedToUserId;
-        const uid =
-          raw === null || raw === undefined || raw === "" ? null : String(raw);
-        if (uid !== null && !findUserById(uid)) {
+      if (method === "POST" && path === "/todos") {
+        let body: { title?: string; category?: string; assignedToUserId?: string | null };
+        try {
+          body = await req.json();
+        } catch {
+          return Response.json({ error: "Invalid JSON" }, { status: 400 });
+        }
+        const title = typeof body?.title === "string" ? body.title.trim() : "";
+        if (!title) {
+          return Response.json({ error: "title is required" }, { status: 400 });
+        }
+        const category =
+          typeof body?.category === "string" && body.category.trim()
+            ? body.category.trim()
+            : "General";
+        const rawAssigned = body?.assignedToUserId;
+        const assignedToUserId =
+          rawAssigned === null || rawAssigned === undefined || rawAssigned === ""
+            ? null
+            : String(rawAssigned);
+        if (assignedToUserId !== null && !findUserById(assignedToUserId)) {
           return Response.json({ error: "User not found" }, { status: 400 });
         }
-        todos[idx].assignedToUserId = uid;
+        const todo: Todo = {
+          id: generateTodoId(),
+          title,
+          category,
+          completed: false,
+          createdAt: new Date().toISOString(),
+          assignedToUserId,
+        };
+        todos.push(todo);
+        return Response.json(todo, { status: 201 });
       }
-      if (typeof body?.completed === "boolean") todos[idx].completed = body.completed;
-      return Response.json(todos[idx]);
-    }
 
-    const deleteMatch = path.match(/^\/todos\/(.+)$/);
-    if (method === "DELETE" && deleteMatch) {
-      const id = deleteMatch[1];
-      const idx = getTodoIndex(id);
-      if (idx === -1) {
-        return Response.json({ error: "Todo not found" }, { status: 404 });
+      const patchMatch = path.match(/^\/todos\/(.+)$/);
+      if (method === "PATCH" && patchMatch) {
+        const id = patchMatch[1];
+        const idx = getTodoIndex(id);
+        if (idx === -1) {
+          return Response.json({ error: "Todo not found" }, { status: 404 });
+        }
+        let body: {
+          title?: string;
+          category?: string;
+          assignedToUserId?: string | null;
+          completed?: boolean;
+        };
+        try {
+          body = await req.json();
+        } catch {
+          return Response.json({ error: "Invalid JSON" }, { status: 400 });
+        }
+        // Allow optional title update (preserve existing if omitted or null)
+        if ("title" in body) todos[idx].title = body.title ?? todos[idx].title;
+        if (typeof body?.category === "string" && body.category.trim())
+          todos[idx].category = body.category.trim();
+        if ("assignedToUserId" in body) {
+          const raw = body.assignedToUserId;
+          const uid =
+            raw === null || raw === undefined || raw === "" ? null : String(raw);
+          if (uid !== null && !findUserById(uid)) {
+            return Response.json({ error: "User not found" }, { status: 400 });
+          }
+          todos[idx].assignedToUserId = uid;
+        }
+        if (typeof body?.completed === "boolean") todos[idx].completed = body.completed;
+        return Response.json(todos[idx]);
       }
-      todos.splice(idx, 1);
-      return new Response(null, { status: 204 });
-    }
 
-    return Response.json({ error: "Not Found" }, { status: 404 });
+      const deleteMatch = path.match(/^\/todos\/(.+)$/);
+      if (method === "DELETE" && deleteMatch) {
+        const id = deleteMatch[1];
+        const idx = getTodoIndex(id);
+        if (idx === -1) {
+          return Response.json({ error: "Todo not found" }, { status: 404 });
+        }
+        todos.splice(idx, 1);
+        return new Response(null, { status: 204 });
+      }
+
+      return Response.json({ error: "Not Found" }, { status: 404 });
+    } catch (err) {
+      void coolKeeper.report(err instanceof Error ? err : String(err), { path, method });
+      return Response.json(
+        { error: err instanceof Error ? err.message : "Internal Server Error" },
+        { status: 500 }
+      );
+    }
   },
 });
 
