@@ -1,23 +1,25 @@
+import { config } from "./config";
+
 type ReportResult = { jobId: string } | { skipped: true; reason: string; prUrl?: string } | null;
 
 interface CoolKeeperOptions {
-  publicKey: string;
-  appId: string;
+  orgId: string;
+  apiKey: string;
   url: string;
   repoUrl: string;
   branch: string;
 }
 
 export class CoolKeeper {
-  private publicKey: string;
-  private appId: string;
+  private orgId: string;
+  private apiKey: string;
   private url: string;
   private repoUrl: string;
   private branch: string;
 
   constructor(opts: CoolKeeperOptions) {
-    this.publicKey = opts.publicKey;
-    this.appId = opts.appId;
+    this.orgId = opts.orgId;
+    this.apiKey = opts.apiKey;
     this.url = opts.url.replace(/\/$/, "");
     this.repoUrl = opts.repoUrl;
     this.branch = opts.branch;
@@ -38,12 +40,12 @@ export class CoolKeeper {
 
       console.log({ body })
 
-      const res = await fetch(`${this.url}/api/errors`, {
+      const res = await fetch(`${this.url}/api/reports`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-public-key": this.publicKey,
-          "x-app-id": this.appId,
+          "x-org-id": this.orgId,
+          "x-api-key": this.apiKey,
         },
         body,
       });
@@ -64,9 +66,9 @@ export class CoolKeeper {
 }
 
 export const coolKeeper = new CoolKeeper({
-  url: "https://cool-keeper.sacadalabs.com",
-  appId: "setup-my-mac",
-  publicKey: "91e145ba4a27f823dccda2bd46ea968b03a0ee4cb36df49f53e98e6474c44403",
-  repoUrl: "https://github.com/claudiobusatto/demo-app-with-errors",
-  branch: "main",
+  url: config.COOL_KEEPER_URL,
+  orgId: config.COOL_KEEPER_ORG_ID,
+  apiKey: config.COOL_KEEPER_API_KEY,
+  repoUrl: config.COOL_KEEPER_REPO_URL,
+  branch: config.COOL_KEEPER_BRANCH,
 });

@@ -1,6 +1,7 @@
+import { config } from "./config";
 import { coolKeeper } from "./coolkeeper";
 
-const port = Number(process.env.PORT ?? 4000);
+const port = Number(config.PORT);
 
 type User = {
   id: string;
