@@ -1,6 +1,11 @@
-# Todo List App
+# Todo List App (Bun + In-Memory API)
 
-A simple todo list with in-memory storage. No database required.
+Small Bun app that serves:
+
+- a browser UI at `/`
+- a JSON API for users and todos
+- in-memory storage (everything resets on restart)
+- error reporting to CoolKeeper on unhandled runtime errors
 
 ## Setup
 
@@ -10,45 +15,26 @@ A simple todo list with in-memory storage. No database required.
 bun install
 ```
 
-2. (Optional) Configure env:
+2. Configure environment variables:
 
 ```bash
 cp .env.example .env
 ```
 
+`COOL_KEEPER_ORG_ID` and `COOL_KEEPER_API_KEY` are required by runtime config validation (`zod`), so the app will fail at startup if they are missing.
+
 ## Run
+
+Development (watch mode):
 
 ```bash
 bun run dev
 ```
 
-Or without watch:
+Production-style:
 
 ```bash
 bun run start
 ```
 
 The app listens on **http://localhost:4000** by default (override with `PORT`).
-
-## Usage
-
-- Open **http://localhost:4000** in your browser to use the web UI: add todos, mark them done, and delete them.
-- Todos are stored in memory for the lifetime of the process; they are lost when the server restarts.
-
-## API
-
-| Method | Path        | Description                |
-|--------|-------------|----------------------------|
-| GET    | `/`         | Todo list web UI           |
-| GET    | `/health`   | Health check               |
-| GET    | `/todos`    | List all todos             |
-| POST   | `/todos`    | Create a todo (body: `{ "title": "..." }`) |
-| PATCH  | `/todos/:id`| Update todo (body: `{ "title"?: "...", "completed"?: true/false }`) |
-| DELETE | `/todos/:id`| Delete a todo              |
-
-Example:
-
-```bash
-curl -X POST http://localhost:4000/todos -H "Content-Type: application/json" -d '{"title":"Buy milk"}'
-curl http://localhost:4000/todos
-```
